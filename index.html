@@ -1,0 +1,554 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Strange Attractors</title>
+<style>
+  :root { --bg: #fff; --ink: #1d2230; --muted: #5f6678; --card: rgba(255,255,255,.85); --line: #e3e5ea; --field: #fff;
+    color-scheme: light; }
+  :root[data-theme="dark"] { --bg: #0e1016; --ink: #e8eaf0; --muted: #9aa1b4; --card: rgba(22,25,34,.85); --line: #2c3140;
+    --field: #161922; color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden;
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; color: var(--ink); }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; }
+  canvas:active { cursor: grabbing; }
+  #side { position: fixed; left: 32px; top: 28px; width: 290px; }
+  #panel { pointer-events: none; transition: opacity .6s ease; }
+  #panel h1 { margin: 0 0 10px; font-size: 30px; font-weight: 600; letter-spacing: .01em; }
+  #panel .eq { font-size: 19px; line-height: 1.6; font-style: italic; }
+  #panel .eq b { font-style: normal; font-weight: 400; display: inline-block; width: 1.3em; }
+  #panel .params { margin-top: 8px; font-size: 14px; color: var(--muted); font-family: ui-monospace, Menlo, monospace; }
+  #nav { position: fixed; left: 50%; transform: translateX(-50%); bottom: 20px; width: min(860px, calc(100% - 340px));
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+  #nav button { font: inherit; font-size: 14px; border: 1px solid var(--line); background: var(--card); color: var(--muted);
+    padding: 5px 12px; border-radius: 999px; cursor: pointer; transition: all .3s; }
+  #nav button.on { color: #fff; border-color: transparent; }
+  :root[data-theme="dark"] #nav button.on { color: var(--bg); }
+  #hint { position: fixed; right: 24px; bottom: 30px; font-size: 13px; color: var(--muted); font-family: system-ui, sans-serif; }
+  #settings { margin-top: 18px; font-family: system-ui, -apple-system, sans-serif; font-size: 13px; color: var(--muted);
+    background: var(--card); backdrop-filter: blur(6px); border: 1px solid var(--line); border-radius: 12px; }
+  #settings summary { cursor: pointer; padding: 9px 14px; font-weight: 600; color: var(--ink); list-style: none; user-select: none; }
+  #settings summary::-webkit-details-marker { display: none; }
+  #settings summary::before { content: '▸'; display: inline-block; width: 1em; transition: transform .2s; }
+  #settings[open] summary::before { transform: rotate(90deg); }
+  #settings .body { padding: 2px 14px 14px; display: grid; gap: 11px; }
+  #settings label { display: grid; grid-template-columns: 92px 1fr 34px; align-items: center; gap: 8px; }
+  #settings .val { text-align: right; font-variant-numeric: tabular-nums; }
+  #settings input[type=range] { width: 100%; accent-color: var(--accent, #b23cff); }
+  #settings select { font: inherit; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--field); color: var(--ink); }
+  #settings .swatches { display: flex; gap: 6px; }
+  #settings input[type=color] { width: 28px; height: 22px; padding: 0; border: 1px solid var(--line); border-radius: 5px; background: none; cursor: pointer; }
+  #settings .sub { font-size: 12px; margin-top: -6px; padding-left: 100px; }
+  #settings button { justify-self: start; font: inherit; color: var(--muted); background: none; border: 1px solid var(--line);
+    border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  #settings button:hover { color: var(--ink); }
+  #settings .body { max-height: calc(100vh - 300px); overflow-y: auto; }
+  #settings .group { font-weight: 600; color: var(--ink); margin-top: 4px; }
+  #settings .checks { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; }
+  #settings .checks label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+  #settings .checks input { accent-color: var(--accent, #b23cff); margin: 0; }
+  #settings .row { display: flex; gap: 6px; }
+  #nav button.off { opacity: .45; }
+  /* screensaver: only title, equations and the attractor */
+  body.saver #settings, body.saver #nav, body.saver #hint { display: none; }
+  body.saver canvas { cursor: none; }
+  body.saver #panel h1 { font-size: 34px; } body.saver #panel .eq { font-size: 21px; }
+  body.preview #side { display: none; }
+  body.config #hint { display: none; }
+  @media (max-width: 600px) {
+    #side { left: 16px; top: 16px; width: calc(100% - 32px); max-width: 290px; } #panel h1 { font-size: 22px; } #panel .eq { font-size: 15px; }
+    #hint { display: none; }
+    #nav { width: calc(100% - 32px); flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; padding-bottom: 4px; }
+    #nav button { flex: none; }
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="side">
+  <div id="panel"></div>
+  <details id="settings" open>
+    <summary>Settings</summary>
+    <div class="body">
+      <label>Theme
+        <select id="theme" style="grid-column: span 2"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select>
+      </label>
+      <label>Palette
+        <select id="palette" style="grid-column: span 2"></select>
+      </label>
+      <label>Colors <span class="swatches" id="swatches"></span><span></span></label>
+      <div class="sub">gradient for the current attractor</div>
+      <label>Line width <input type="range" id="width" min="0.3" max="4" step="0.1"><span class="val" id="widthV"></span></label>
+      <label>Glow size <input type="range" id="glowSize" min="1" max="40" step="1"><span class="val" id="glowSizeV"></span></label>
+      <label>Glow <input type="range" id="glow" min="0" max="1" step="0.05"><span class="val" id="glowV"></span></label>
+      <label>Echo <input type="range" id="echo" min="0" max="0.9" step="0.01"><span class="val" id="echoV"></span></label>
+      <label>Dots <input type="range" id="dots" min="0" max="12" step="1"><span class="val" id="dotsV"></span></label>
+      <label>Dot speed <input type="range" id="dotSpeed" min="0" max="5" step="0.1"><span class="val" id="dotSpeedV"></span></label>
+      <label>Dot size <input type="range" id="dotSize" min="0.3" max="3" step="0.1"><span class="val" id="dotSizeV"></span></label>
+      <label>Trail <input type="range" id="trail" min="0" max="1000" step="10"><span class="val" id="trailV"></span></label>
+      <label>Dot contrast <input type="range" id="contrast" min="0" max="1" step="0.05"><span class="val" id="contrastV"></span></label>
+      <label>Change every <input type="range" id="hold" min="3" max="120" step="1"><span class="val" id="holdV"></span></label>
+      <label>Transition <input type="range" id="morph" min="1" max="10" step="0.5"><span class="val" id="morphV"></span></label>
+      <div class="group">Attractors</div>
+      <div class="checks" id="checks"></div>
+      <div class="row"><button id="all">All</button><button id="none">None</button></div>
+      <button id="reset">Reset</button>
+    </div>
+  </details>
+</div>
+<div id="nav"></div>
+<div id="hint">drag to rotate · space for next</div>
+<script>
+(() => {
+  // app (default) | saver | preview | config; the macOS screensaver injects window.__SAVER__
+  const SAVER = window.__SAVER__ || null;
+  const MODE = (SAVER && SAVER.mode) || new URLSearchParams(location.search).get('mode') || 'app';
+  document.body.classList.add(MODE);
+  if (MODE === 'preview') document.body.classList.add('saver');
+  const N = 6000;          // points per attractor
+  const BUCKETS = 120;     // colour bands along the curve
+
+  // ---------- integration ----------
+  function rk4(f, p, dt) {
+    const k1 = f(p);
+    const k2 = f(p.map((v, i) => v + k1[i] * dt / 2));
+    const k3 = f(p.map((v, i) => v + k2[i] * dt / 2));
+    const k4 = f(p.map((v, i) => v + k3[i] * dt));
+    return p.map((v, i) => v + dt / 6 * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]));
+  }
+  function build({ f, p0, dt, sub, warm, map }) {
+    let p = p0.slice();
+    for (let i = 0; i < warm; i++) p = rk4(f, p, dt);
+    const out = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) {
+      for (let s = 0; s < sub; s++) p = rk4(f, p, dt);
+      const q = map(p);
+      out[i * 3] = q[0]; out[i * 3 + 1] = q[1]; out[i * 3 + 2] = q[2];
+    }
+    // centre and normalise to a unit-ish box
+    const mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
+    for (let i = 0; i < N * 3; i++) { const a = i % 3; mn[a] = Math.min(mn[a], out[i]); mx[a] = Math.max(mx[a], out[i]); }
+    const c = mn.map((v, a) => (v + mx[a]) / 2);
+    const s = 2 / Math.max(...mx.map((v, a) => v - mn[a]));
+    for (let i = 0; i < N * 3; i++) out[i] = (out[i] - c[i % 3]) * s;
+    return out;
+  }
+
+  const attractors = [
+    {
+      name: 'Rössler attractor',
+      eq: ['−y − z', 'x + a y', 'b + z (x − c)'],
+      params: 'a = 0.2   b = 0.2   c = 5.7',
+      colors: ['#2b6cff', '#b23cff', '#ff3d8b'],
+      f: ([x, y, z]) => [-y - z, x + 0.2 * y, 0.2 + z * (x - 5.7)],
+      p0: [1, 1, 0], dt: 0.01, sub: 3, warm: 2000, map: ([x, y, z]) => [x, z, y],
+    },
+    {
+      name: 'Rucklidge attractor',
+      eq: ['−κ x + λ y − y z', 'x', '−z + y²'],
+      params: 'κ = 2   λ = 6.7',
+      colors: ['#ff8a00', '#ff3b3b', '#c2187a'],
+      f: ([x, y, z]) => [-2 * x + 6.7 * y - y * z, x, -z + y * y],
+      p0: [1, 0, 4.5], dt: 0.01, sub: 2, warm: 3000, map: ([x, y, z]) => [x, z, y],
+    },
+    {
+      name: 'Thomas attractor',
+      eq: ['sin y − b x', 'sin z − b y', 'sin x − b z'],
+      params: 'b = 0.208186',
+      colors: ['#00a6a6', '#1fbf5f', '#3a7bd5'],
+      f: ([x, y, z]) => [Math.sin(y) - 0.208186 * x, Math.sin(z) - 0.208186 * y, Math.sin(x) - 0.208186 * z],
+      p0: [0.1, 0, 0], dt: 0.04, sub: 3, warm: 3000, map: p => p,
+    },
+    {
+      name: 'Halvorsen attractor',
+      eq: ['−a x − 4y − 4z − y²', '−a y − 4z − 4x − z²', '−a z − 4x − 4y − x²'],
+      params: 'a = 1.4',
+      colors: ['#7b2ff7', '#f107a3', '#ffb800'],
+      f: ([x, y, z]) => [-1.4 * x - 4 * y - 4 * z - y * y, -1.4 * y - 4 * z - 4 * x - z * z, -1.4 * z - 4 * x - 4 * y - x * x],
+      p0: [-1.48, -1.51, 2.04], dt: 0.005, sub: 6, warm: 3000, map: p => p,
+    },
+    {
+      name: 'Lorenz attractor',
+      eq: ['σ (y − x)', 'x (ρ − z) − y', 'x y − β z'],
+      params: 'σ = 10   ρ = 28   β = 8/3',
+      colors: ['#0057ff', '#00b3ff', '#7a2cff'],
+      f: ([x, y, z]) => [10 * (y - x), x * (28 - z) - y, x * y - 8 / 3 * z],
+      p0: [1, 1, 1], dt: 0.004, sub: 3, warm: 3000, map: ([x, y, z]) => [x, z, y],
+    },
+    {
+      name: 'Aizawa attractor',
+      eq: ['(z − b) x − d y', 'd x + (z − b) y', 'c + a z − z³/3 − (x² + y²)(1 + e z) + f z x³'],
+      params: 'a = 0.95   b = 0.7   c = 0.6   d = 3.5   e = 0.25   f = 0.1',
+      colors: ['#ff4d6d', '#c9184a', '#590d22'],
+      f: ([x, y, z]) => [(z - 0.7) * x - 3.5 * y, 3.5 * x + (z - 0.7) * y,
+        0.6 + 0.95 * z - z * z * z / 3 - (x * x + y * y) * (1 + 0.25 * z) + 0.1 * z * x * x * x],
+      p0: [0.1, 0, 0], dt: 0.01, sub: 3, warm: 3000, map: ([x, y, z]) => [x, z, y],
+    },
+    {
+      name: 'Dadras attractor',
+      eq: ['y − a x + b y z', 'c y − x z + z', 'd x y − e z'],
+      params: 'a = 3   b = 2.7   c = 1.7   d = 2   e = 9',
+      colors: ['#00897b', '#43a047', '#7cb342'],
+      f: ([x, y, z]) => [y - 3 * x + 2.7 * y * z, 1.7 * y - x * z + z, 2 * x * y - 9 * z],
+      p0: [1, 1, 0], dt: 0.005, sub: 2, warm: 3000, map: p => p,
+    },
+    {
+      name: 'Chen attractor',
+      eq: ['a (y − x)', '(c − a) x − x z + c y', 'x y − b z'],
+      params: 'a = 35   b = 3   c = 28',
+      colors: ['#ff6f00', '#ffa000', '#d84315'],
+      f: ([x, y, z]) => [35 * (y - x), -7 * x - x * z + 28 * y, x * y - 3 * z],
+      p0: [-10, 0, 37], dt: 0.002, sub: 2, warm: 3000, map: ([x, y, z]) => [x, z, y],
+    },
+    {
+      name: 'Sprott attractor',
+      eq: ['y + a x y + x z', '1 − b x² + y z', 'x − x² − y²'],
+      params: 'a = 2.07   b = 1.79',
+      colors: ['#5e60ce', '#4ea8de', '#48bfe3'],
+      f: ([x, y, z]) => [y + 2.07 * x * y + x * z, 1 - 1.79 * x * x + y * z, x - x * x - y * y],
+      p0: [0.63, 0.47, -0.54], dt: 0.005, sub: 4, warm: 2000, map: p => p,
+    },
+    {
+      name: 'Four-Wing attractor',
+      eq: ['a x + y z', 'b x + c y − x z', '−z − x y'],
+      params: 'a = 0.2   b = 0.01   c = −0.4',
+      colors: ['#d81b60', '#8e24aa', '#3949ab'],
+      f: ([x, y, z]) => [0.2 * x + y * z, 0.01 * x - 0.4 * y - x * z, -z - x * y],
+      p0: [1.3, -0.18, 0.01], dt: 0.02, sub: 3, warm: 2000, map: p => p,
+    },
+    {
+      name: 'Three-Scroll attractor',
+      eq: ['a (y − x) + d x z', 'f y − x z', 'b z + x y − e x²'],
+      params: 'a = 40   b = 0.833   d = 0.5   e = 0.65   f = 20',
+      colors: ['#2a9d8f', '#e9c46a', '#e76f51'],
+      f: ([x, y, z]) => [40 * (y - x) + 0.5 * x * z, 20 * y - x * z, 0.833 * z + x * y - 0.65 * x * x],
+      p0: [-0.29, -0.25, -0.59], dt: 0.0005, sub: 4, warm: 6000, map: ([x, y, z]) => [x, z, y],
+    },
+    {
+      name: 'Nosé–Hoover attractor',
+      eq: ['y', '−x + y z', 'a − y²'],
+      params: 'a = 1.5',
+      colors: ['#6d597a', '#b56576', '#e56b6f'],
+      f: ([x, y, z]) => [y, -x + y * z, 1.5 - y * y],
+      p0: [0, 5, 0], dt: 0.01, sub: 4, warm: 1000, map: p => p,
+    },
+    {
+      name: 'Dequan Li attractor',
+      eq: ['a (y − x) + d x z', 'k x + f y − x z', 'c z + x y − e x²'],
+      params: 'a = 40   c = 1.833   d = 0.16   e = 0.65   k = 55   f = 20',
+      colors: ['#1565c0', '#00acc1', '#26a69a'],
+      f: ([x, y, z]) => [40 * (y - x) + 0.16 * x * z, 55 * x + 20 * y - x * z, 1.833 * z + x * y - 0.65 * x * x],
+      p0: [0.349, 0, -0.16], dt: 0.0004, sub: 4, warm: 6000, map: ([x, y, z]) => [x, z, y],
+    },
+    {
+      name: 'Arneodo attractor',
+      eq: ['y', 'z', '−a x − b y − z + c x³'],
+      params: 'a = −5.5   b = 3.5   c = −1',
+      colors: ['#f72585', '#7209b7', '#4361ee'],
+      f: ([x, y, z]) => [y, z, 5.5 * x - 3.5 * y - z - x * x * x],
+      p0: [0.1, 0, 0], dt: 0.01, sub: 3, warm: 2000, map: p => p,
+    },
+    {
+      name: 'Burke–Shaw attractor',
+      eq: ['−s (x + y)', '−y − s x z', 's x y + v'],
+      params: 's = 10   v = 4.272',
+      colors: ['#bc6c25', '#dda15e', '#606c38'],
+      f: ([x, y, z]) => [-10 * (x + y), -y - 10 * x * z, 10 * x * y + 4.272],
+      p0: [0.6, 0, 0], dt: 0.003, sub: 4, warm: 3000, map: p => p,
+    },
+    {
+      name: 'Chua attractor',
+      eq: ['α (y − x − h(x))', 'x − y + z', '−β y'],
+      params: 'α = 15.6   β = 28   m₀ = −1.143   m₁ = −0.714',
+      colors: ['#118ab2', '#06d6a0', '#ef476f'],
+      f: ([x, y, z]) => {
+        const h = -0.714 * x + 0.5 * (-1.143 + 0.714) * (Math.abs(x + 1) - Math.abs(x - 1));
+        return [15.6 * (y - x - h), x - y + z, -28 * y];
+      },
+      p0: [0.7, 0, 0], dt: 0.005, sub: 4, warm: 3000, map: p => p,
+    },
+  ];
+
+  // gradients are assigned to attractors in order, cycling when a palette has fewer than there are attractors
+  const PALETTES = {
+    Vivid:  attractors.map(a => a.colors),
+    Sunset: [['#ffb000', '#ff5e3a', '#c81d77'], ['#ff7a59', '#e0245e', '#6a2c91'], ['#f9c80e', '#f86624', '#ea3546'], ['#ff9e00', '#ff006e', '#8338ec']],
+    Ocean:  [['#0077b6', '#00b4d8', '#48cae4'], ['#023e8a', '#0096c7', '#2ec4b6'], ['#03045e', '#0077b6', '#00b4d8'], ['#005f73', '#0a9396', '#94d2bd']],
+    Forest: [['#2d6a4f', '#52b788', '#95d5b2'], ['#606c38', '#a3b18a', '#dda15e'], ['#1b4332', '#40916c', '#b7e4c7'], ['#344e41', '#588157', '#a3b18a']],
+    Pastel: [['#8ecae6', '#cdb4db', '#ffafcc'], ['#ffc8a2', '#f7a1a1', '#d4a5d6'], ['#a8e6cf', '#9ad1d4', '#b8c0ff'], ['#bdb2ff', '#ffc6ff', '#ffadad']],
+    Ink:    [['#1d2230', '#4a5068', '#8a90a6'], ['#2b2b2b', '#5a5a5a', '#9a9a9a'], ['#14213d', '#3d4a6b', '#7d8bb0'], ['#202a44', '#4b5563', '#9ca3af']],
+  };
+  // Ink is dark-on-light; in dark mode it uses these light greys instead
+  const INK_DARK = [['#e8eaf0', '#a9afc2', '#6b7187'], ['#f0f0f0', '#b5b5b5', '#7a7a7a'], ['#dfe6ff', '#9aa7cc', '#5f6c91'], ['#e5e7eb', '#a1a7b3', '#6b7280']];
+  const DEFAULTS = { theme: 'system', palette: 'Vivid', colors: PALETTES.Vivid, width: 1.1, glowSize: 10, glow: 0, echo: 0, dots: 1, dotSpeed: 1, dotSize: 1, contrast: 0.4, trail: 90,
+    hold: 7, morph: 3.5, enabled: null };  // enabled: list of attractor names, null = all
+
+  const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+  function setColors(a, colors) {
+    a.colors = colors.slice();
+    const stops = a.colors.map(hex);
+    a.band = Array.from({ length: BUCKETS }, (_, k) => {
+      const t = k / (BUCKETS - 1) * (stops.length - 1), j = Math.min(stops.length - 2, Math.floor(t)), u = t - j;
+      return stops[j].map((v, i) => v + (stops[j + 1][i] - v) * u);
+    });
+    a.accent = a.colors[1];
+  }
+  for (const a of attractors) a.pts = build(a);
+
+  // ---------- UI ----------
+  const panel = document.getElementById('panel'), nav = document.getElementById('nav');
+  function renderPanel(a) {
+    panel.innerHTML = `<h1 style="color:${a.accent}">${a.name}</h1>
+      <div class="eq"><b>ẋ</b>= ${a.eq[0]}<br><b>ẏ</b>= ${a.eq[1]}<br><b>ż</b>= ${a.eq[2]}</div>
+      <div class="params">${a.params}</div>`;
+    document.documentElement.style.setProperty('--accent', a.accent);
+  }
+  function showPanel(a) {
+    panel.style.opacity = 0;
+    syncSwatches(a);
+    setTimeout(() => { renderPanel(a); panel.style.opacity = 1; }, 400);
+  }
+  const buttons = attractors.map((a, i) => {
+    const b = document.createElement('button');
+    b.textContent = a.name.replace(' attractor', '');
+    b.onclick = () => goTo(i);
+    nav.appendChild(b); return b;
+  });
+  function markNav(i) {
+    buttons.forEach((b, j) => { b.classList.toggle('on', j === i); b.style.background = j === i ? attractors[j].accent : ''; });
+  }
+
+  // ---------- settings ----------
+  let cur = 0, next = 0, phaseStart = 0, morphing = false;
+  const $ = id => document.getElementById(id);
+  let cfg;
+  try {
+    const stored = SAVER ? SAVER.cfg : JSON.parse(localStorage.getItem('attractor-settings') || 'null');
+    cfg = { ...DEFAULTS, ...(stored || {}) };
+  } catch (e) { cfg = { ...DEFAULTS }; }
+  const save = () => {
+    if (SAVER) { try { window.webkit.messageHandlers.saver.postMessage(JSON.stringify(cfg)); } catch (e) {} return; }
+    try { localStorage.setItem('attractor-settings', JSON.stringify(cfg)); } catch (e) {}
+  };
+  const isOn = i => !cfg.enabled || cfg.enabled.includes(attractors[i].name);
+  // next enabled attractor after i (wrapping); i itself if it is the only one
+  const nextOn = i => { for (let k = 1; k <= attractors.length; k++) { const j = (i + k) % attractors.length; if (isOn(j)) return j; } return i; };
+  const darkQuery = matchMedia('(prefers-color-scheme: dark)');
+  const isDark = () => cfg.theme === 'dark' || (cfg.theme === 'system' && darkQuery.matches);
+  const paletteOf = name => name === 'Ink' && isDark() ? INK_DARK : PALETTES[name];
+  let bgRGB = [255, 255, 255];
+  function applyTheme() {
+    document.documentElement.dataset.theme = isDark() ? 'dark' : 'light';
+    bgRGB = isDark() ? [14, 16, 22] : [255, 255, 255];
+    if (cfg.palette === 'Ink') applyPalette('Ink');
+  }
+  const pal = paletteOf(cfg.palette);
+  attractors.forEach((a, i) => setColors(a, pal ? pal[i % pal.length] : cfg.colors[i] || DEFAULTS.colors[i]));
+
+  for (const name of [...Object.keys(PALETTES), 'Custom']) $('palette').add(new Option(name, name));
+  const swatches = [0, 1, 2].map(k => {
+    const inp = document.createElement('input'); inp.type = 'color';
+    inp.oninput = () => {
+      const a = attractors[next], c = a.colors.slice(); c[k] = inp.value;
+      setColors(a, c); cfg.colors = attractors.map(a => a.colors); cfg.palette = 'Custom';
+      $('palette').value = 'Custom'; renderPanel(a); markNav(next); save();
+    };
+    $('swatches').appendChild(inp); return inp;
+  });
+  function syncSwatches(a) { swatches.forEach((s, k) => s.value = a.colors[k]); }
+  function applyPalette(name) {
+    const pal = paletteOf(name);
+    if (!pal) return;
+    attractors.forEach((a, i) => setColors(a, pal[i % pal.length]));
+    cfg.palette = name; cfg.colors = attractors.map(a => a.colors);
+    syncSwatches(attractors[next]); renderPanel(attractors[next]); markNav(next); save();
+  }
+  $('palette').onchange = e => applyPalette(e.target.value);
+
+  const sliders = { width: v => v.toFixed(1), glowSize: v => v + 'px', glow: v => Math.round(v * 100) + '%', echo: v => Math.round(v * 100) + '%',
+    dots: v => String(v), dotSpeed: v => v.toFixed(1) + '×', dotSize: v => v.toFixed(1) + '×',
+    contrast: v => Math.round(v * 100) + '%', trail: v => String(v),
+    hold: v => v + 's', morph: v => v + 's' };
+  for (const [key, fmt] of Object.entries(sliders)) {
+    const el = $(key), out = $(key + 'V');
+    const show = () => out.textContent = fmt(cfg[key]);
+    el.value = cfg[key]; show();
+    el.oninput = () => { cfg[key] = +el.value; show(); save(); };
+  }
+  const checks = attractors.map((a, i) => {
+    const l = document.createElement('label'), c = document.createElement('input');
+    c.type = 'checkbox';
+    c.onchange = () => {
+      const on = attractors.filter((_, j) => j === i ? c.checked : isOn(j)).map(a => a.name);
+      if (!on.length) { c.checked = true; return; }   // keep at least one
+      setEnabled(on);
+    };
+    l.append(c, a.name.replace(' attractor', '')); $('checks').appendChild(l); return c;
+  });
+  function setEnabled(list) {
+    cfg.enabled = list.length === attractors.length ? null : list;
+    checks.forEach((c, i) => c.checked = isOn(i));
+    buttons.forEach((b, i) => b.classList.toggle('off', !isOn(i)));
+    save();
+  }
+  $('all').onclick = () => setEnabled(attractors.map(a => a.name));
+  $('none').onclick = () => setEnabled([attractors[cur].name]);
+  checks.forEach((c, i) => c.checked = isOn(i));
+  buttons.forEach((b, i) => b.classList.toggle('off', !isOn(i)));
+
+  $('reset').onclick = () => {
+    Object.assign(cfg, DEFAULTS);
+    setEnabled(attractors.map(a => a.name));
+    for (const key in sliders) { $(key).value = cfg[key]; $(key + 'V').textContent = sliders[key](cfg[key]); }
+    $('palette').value = 'Vivid'; $('theme').value = cfg.theme; applyTheme(); applyPalette('Vivid');
+  };
+  $('palette').value = cfg.palette;
+  $('theme').value = cfg.theme;
+  $('theme').onchange = e => { cfg.theme = e.target.value; save(); applyTheme(); };
+  darkQuery.addEventListener('change', () => { if (cfg.theme === 'system') applyTheme(); });
+  applyTheme();
+  if (matchMedia('(max-width: 600px)').matches) $('settings').open = false;
+  // the screensaver starts on a random enabled attractor, the app on the first one
+  const on = attractors.map((_, i) => i).filter(isOn);
+  cur = next = MODE === 'saver' || MODE === 'preview' ? on[Math.floor(Math.random() * on.length)] : on[0];
+
+  // ---------- state ----------
+  const P = new Float32Array(N * 3);
+  const sArr = new Float32Array(N);
+  function goTo(i) {
+    if (morphing || i === cur) return;
+    next = i; morphing = true; phaseStart = now;
+    showPanel(attractors[i]); markNav(i);
+  }
+
+  const canvas = document.getElementById('c'), main = canvas.getContext('2d');
+  // the scene is drawn to an offscreen layer, then composited with glow / echo
+  const layer = document.createElement('canvas'), ctx = layer.getContext('2d');
+  let W, H, dpr;
+  function resize() {
+    dpr = Math.min(2, window.devicePixelRatio || 1);
+    W = innerWidth; H = innerHeight;
+    canvas.width = layer.width = W * dpr; canvas.height = layer.height = H * dpr;
+  }
+  addEventListener('resize', resize); resize();
+
+  let rotY = 0.6, rotX = -0.35, velY = 0.18, drag = null;
+  canvas.addEventListener('pointerdown', e => { if (document.body.classList.contains('saver')) return; drag = { x: e.clientX, y: e.clientY }; canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener('pointermove', e => {
+    if (!drag) return;
+    rotY += (e.clientX - drag.x) * 0.006; rotX += (e.clientY - drag.y) * 0.006;
+    rotX = Math.max(-1.4, Math.min(1.4, rotX));
+    drag = { x: e.clientX, y: e.clientY };
+  });
+  addEventListener('pointerup', () => drag = null);
+  addEventListener('keydown', e => { if (e.code === 'Space' && !e.target.closest('input, select, button, summary')) { e.preventDefault(); goTo(nextOn(cur)); } });
+
+  const ease = t => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  const sx = new Float32Array(N), sy = new Float32Array(N), sz = new Float32Array(N);
+  let dotPos = 0, now = 0, last = performance.now();
+
+  function frame(t) {
+    requestAnimationFrame(frame);
+    try { draw(t); } catch (e) { console.error(e); }
+  }
+
+  function draw(t) {
+    const dt = Math.max(0, Math.min(0.05, (t - last) / 1000)); last = t; now += dt;
+    if (!drag) rotY += velY * dt;
+
+    // morph scheduling
+    let u = 0;
+    if (morphing) {
+      u = Math.min(1, (now - phaseStart) / cfg.morph);
+      if (u >= 1) { cur = next; morphing = false; phaseStart = now; u = 0; }
+    } else if (now - phaseStart > cfg.hold || !isOn(cur)) {
+      goTo(nextOn(cur));
+    }
+
+    const A = attractors[cur].pts, B = attractors[next].pts;
+    for (let i = 0; i < N; i++) {
+      // sweep the transformation along the curve
+      const s = morphing ? ease(Math.max(0, Math.min(1, u * 1.6 - (i / N) * 0.6))) : 0;
+      sArr[i] = s;
+      const j = i * 3;
+      // lift points off the curve mid-transition for a breathing effect
+      const lift = 1 + Math.sin(s * Math.PI) * 0.25;
+      P[j] = (A[j] + (B[j] - A[j]) * s) * lift;
+      P[j + 1] = (A[j + 1] + (B[j + 1] - A[j + 1]) * s) * lift;
+      P[j + 2] = (A[j + 2] + (B[j + 2] - A[j + 2]) * s) * lift;
+    }
+
+    // project
+    const cy = Math.cos(rotY), syn = Math.sin(rotY), cx = Math.cos(rotX), sxn = Math.sin(rotX);
+    const scale = Math.min(W, H) * 0.36, cam = 3.4, ox = W / 2, oy = H / 2 + 10;
+    for (let i = 0; i < N; i++) {
+      const j = i * 3; let x = P[j], y = P[j + 1], z = P[j + 2];
+      const x1 = x * cy + z * syn, z1 = -x * syn + z * cy;
+      const y1 = y * cx - z1 * sxn, z2 = y * sxn + z1 * cx;
+      const k = cam / (cam + z2);
+      sx[i] = ox + x1 * scale * k; sy[i] = oy - y1 * scale * k; sz[i] = z2;
+    }
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    ctx.lineJoin = ctx.lineCap = 'round';
+
+    // curve, drawn in colour bands
+    const per = N / BUCKETS, cA = attractors[cur].band, cB = attractors[next].band;
+    ctx.lineWidth = cfg.width;
+    for (let b = 0; b < BUCKETS; b++) {
+      const i0 = Math.floor(b * per), i1 = Math.min(N - 1, Math.floor((b + 1) * per) + 1);
+      const s = sArr[(i0 + i1) >> 1];
+      const c = cA[b].map((v, k) => Math.round(v + (cB[b][k] - v) * s));
+      ctx.strokeStyle = `rgba(${c[0]},${c[1]},${c[2]},${0.62 * (1 - 0.95 * cfg.contrast)})`;
+      ctx.beginPath(); ctx.moveTo(sx[i0], sy[i0]);
+      for (let i = i0 + 1; i <= i1; i++) ctx.lineTo(sx[i], sy[i]);
+      ctx.stroke();
+    }
+
+    // dots travelling along the curve, evenly spaced, each with a fading trail
+    dotPos = (dotPos + dt * 260 * cfg.dotSpeed) % N;
+    const TRAIL = cfg.trail, ds = cfg.dotSize;
+    const bandOf = i => { const b = Math.min(BUCKETS - 1, Math.floor(i / per)), s = sArr[i];
+      return cA[b].map((v, k) => Math.round(v + (cB[b][k] - v) * s)); };
+    for (let d = 0; d < cfg.dots; d++) {
+      const di = Math.floor(dotPos + d * N / cfg.dots) % N;
+      for (let k = TRAIL; k > 0; k--) {
+        const a = (di - k + N) % N, b2 = (a + 1) % N;
+        if (b2 === 0) continue;
+        const c = bandOf(a), f = 1 - k / TRAIL;
+        ctx.strokeStyle = `rgba(${c[0]},${c[1]},${c[2]},${f * 0.9})`;
+        ctx.lineWidth = cfg.width + f * 3.5 * ds;
+        ctx.beginPath(); ctx.moveTo(sx[a], sy[a]); ctx.lineTo(sx[b2], sy[b2]); ctx.stroke();
+      }
+      const c = bandOf(di), kz = cam / (cam + sz[di]);
+      const r = 5.5 * kz * ds;
+      const g = ctx.createRadialGradient(sx[di], sy[di], 0, sx[di], sy[di], r * 4);
+      g.addColorStop(0, `rgba(${c[0]},${c[1]},${c[2]},0.45)`);
+      g.addColorStop(1, `rgba(${c[0]},${c[1]},${c[2]},0)`);
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(sx[di], sy[di], r * 4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = `rgb(${c[0]},${c[1]},${c[2]})`;
+      ctx.beginPath(); ctx.arc(sx[di], sy[di], r, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // composite: echo keeps a fading copy of earlier frames, glow adds blurred copies under the sharp lines
+    main.setTransform(1, 0, 0, 1, 0, 0);
+    main.fillStyle = `rgba(${bgRGB[0]},${bgRGB[1]},${bgRGB[2]},${1 - cfg.echo})`;
+    main.fillRect(0, 0, canvas.width, canvas.height);
+    if (cfg.glow > 0) {
+      main.filter = `blur(${cfg.glowSize * dpr}px)`;
+      // light adds up on a dark background; on white a plain overlay reads as a halo
+      main.globalCompositeOperation = isDark() ? 'lighter' : 'source-over';
+      for (let a = cfg.glow * 3; a > 0; a -= 1) { main.globalAlpha = Math.min(1, a); main.drawImage(layer, 0, 0); }
+      main.globalAlpha = 1; main.globalCompositeOperation = 'source-over'; main.filter = 'none';
+    }
+    main.drawImage(layer, 0, 0);
+  }
+
+  renderPanel(attractors[cur]); syncSwatches(attractors[cur]); markNav(cur);
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

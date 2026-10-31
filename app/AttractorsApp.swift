@@ -2,13 +2,15 @@ import AppKit
 import ServiceManagement
 import WebKit
 
-// Menu-bar app that acts as a screensaver: after the chosen idle time it covers every screen
-// with ../index.html in saver mode and closes on any input. The Settings window hosts the same
-// page in config mode; the page posts its settings through the "saver" message handler.
+// Menu-bar app that shows ../index.html as a live desktop wallpaper (under the desktop icons, on
+// every screen and Space) and, optionally, as a screensaver after the chosen idle time that closes
+// on any input. The Settings window hosts the same page in config mode; the page posts its settings
+// through the "saver" message handler.
 
 private let settingsKey = "settings"
 private let idleKey = "idleMinutes"          // 0 = never start automatically
 private let launchedKey = "hasLaunchedBefore"
+private let wallpaperKey = "wallpaperOn"
 
 private func pageURL() -> URL? { Bundle.main.url(forResource: "index", withExtension: "html") }
 
@@ -46,12 +48,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     private var idleTimer: Timer?
     private var launchItem: NSMenuItem!
     private var idleItems: [NSMenuItem] = []
+    private var wallpaperItem: NSMenuItem!
+    private var wallpaperWindows: [NSWindow] = []
+    private var wallpaperReload: Timer?
 
     private let idleChoices = [1, 2, 5, 10, 15, 20, 30, 60, 0]
 
     func applicationDidFinishLaunching(_ note: Notification) {
-        UserDefaults.standard.register(defaults: [idleKey: 5])
+        UserDefaults.standard.register(defaults: [idleKey: 0, wallpaperKey: true])
         buildMenu()
+        updateWallpaper()
+        NotificationCenter.default.addObserver(self, selector: #selector(screensChanged),
+                                               name: NSApplication.didChangeScreenParametersNotification, object: nil)
         idleTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.checkIdle() }
         if !UserDefaults.standard.bool(forKey: launchedKey) {
             UserDefaults.standard.set(true, forKey: launchedKey)
@@ -72,7 +80,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         statusItem.button?.image = NSImage(systemSymbolName: "scribble.variable", accessibilityDescription: "Attractors")
 
         let menu = NSMenu()
-        menu.addItem(withTitle: "Start Now", action: #selector(startNow), keyEquivalent: "s").target = self
+        wallpaperItem = NSMenuItem(title: "Live Wallpaper", action: #selector(toggleWallpaper), keyEquivalent: "w")
+        wallpaperItem.target = self
+        menu.addItem(wallpaperItem)
+        menu.addItem(withTitle: "Start Screensaver Now", action: #selector(startNow), keyEquivalent: "s").target = self
         menu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",").target = self
         menu.addItem(.separator())
 
@@ -85,7 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             idleMenu.addItem(item)
             idleItems.append(item)
         }
-        let idleItem = NSMenuItem(title: "Start After", action: nil, keyEquivalent: "")
+        let idleItem = NSMenuItem(title: "Screensaver After", action: nil, keyEquivalent: "")
         idleItem.submenu = idleMenu
         menu.addItem(idleItem)
 
@@ -103,6 +114,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         let current = UserDefaults.standard.integer(forKey: idleKey)
         idleItems.forEach { $0.state = $0.tag == current ? .on : .off }
         launchItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        wallpaperItem.state = UserDefaults.standard.bool(forKey: wallpaperKey) ? .on : .off
+    }
+
+    // MARK: - Wallpaper
+
+    @objc private func toggleWallpaper() {
+        UserDefaults.standard.set(!UserDefaults.standard.bool(forKey: wallpaperKey), forKey: wallpaperKey)
+        updateWallpaper()
+        refreshMenu()
+    }
+
+    @objc private func screensChanged() { updateWallpaper() }
+
+    /// Rebuilds the wallpaper windows from scratch: on toggle, screen changes and new settings.
+    private func updateWallpaper() {
+        wallpaperWindows.forEach { $0.orderOut(nil); $0.contentView = nil }
+        wallpaperWindows.removeAll()
+        guard UserDefaults.standard.bool(forKey: wallpaperKey) else { return }
+        for screen in NSScreen.screens {
+            let window = NSWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
+            window.setFrame(screen.frame, display: false)
+            // the desktop level sits above the desktop picture and below the desktop icons
+            window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)))
+            window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+            window.ignoresMouseEvents = true
+            window.hasShadow = false
+            window.isReleasedWhenClosed = false
+            window.backgroundColor = .windowBackgroundColor
+            window.contentView = makeWebView(mode: "wallpaper", frame: NSRect(origin: .zero, size: screen.frame.size), handler: nil)
+            window.orderFrontRegardless()
+            wallpaperWindows.append(window)
+        }
     }
 
     @objc private func chooseIdle(_ sender: NSMenuItem) {
@@ -215,7 +258,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
 
     // Settings are saved as soon as they change in the page.
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
-        if let json = message.body as? String { UserDefaults.standard.set(json, forKey: settingsKey) }
+        guard let json = message.body as? String else { return }
+        UserDefaults.standard.set(json, forKey: settingsKey)
+        // settings arrive on every slider move; refresh the wallpaper once they settle
+        wallpaperReload?.invalidate()
+        wallpaperReload = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in self?.updateWallpaper() }
     }
 }
 

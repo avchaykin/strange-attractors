@@ -101,11 +101,11 @@
 <div id="hint">drag to rotate · space for next</div>
 <script>
 (() => {
-  // app (default) | saver | preview | config; the macOS screensaver injects window.__SAVER__
+  // app (default) | saver | preview | wallpaper | config; the macOS app injects window.__SAVER__
   const SAVER = window.__SAVER__ || null;
   const MODE = (SAVER && SAVER.mode) || new URLSearchParams(location.search).get('mode') || 'app';
   document.body.classList.add(MODE);
-  if (MODE === 'preview') document.body.classList.add('saver');
+  if (MODE === 'preview' || MODE === 'wallpaper') document.body.classList.add('saver');
   const N = 6000;          // points per attractor
   const BUCKETS = 120;     // colour bands along the curve
 
@@ -411,7 +411,7 @@
   if (matchMedia('(max-width: 600px)').matches) $('settings').open = false;
   // the screensaver starts on a random enabled attractor, the app on the first one
   const on = attractors.map((_, i) => i).filter(isOn);
-  cur = next = MODE === 'saver' || MODE === 'preview' ? on[Math.floor(Math.random() * on.length)] : on[0];
+  cur = next = MODE === 'saver' || MODE === 'preview' || MODE === 'wallpaper' ? on[Math.floor(Math.random() * on.length)] : on[0];
 
   // ---------- state ----------
   const P = new Float32Array(N * 3);
@@ -448,8 +448,13 @@
   const sx = new Float32Array(N), sy = new Float32Array(N), sz = new Float32Array(N);
   let dotPos = 0, now = 0, last = performance.now();
 
+  // the wallpaper runs all day, so it is capped at 30 fps
+  const minFrame = MODE === 'wallpaper' ? 1000 / 30 - 2 : 0;
+  let lastFrame = 0;
   function frame(t) {
     requestAnimationFrame(frame);
+    if (t - lastFrame < minFrame) return;
+    lastFrame = t;
     try { draw(t); } catch (e) { console.error(e); }
   }
 
